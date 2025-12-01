@@ -27,10 +27,14 @@ def _fetch_all(table_or_view: str, order: Optional[str] = None, desc: bool = Fal
     if limit:
         query = query.limit(limit)
 
-    response = query.execute()
-    if response.error:
-        raise HTTPException(status_code=500, detail=response.error.message)
-    return response.data
+response = query.execute()
+
+# O Supabase Client atual usa 'error_message' em vez de 'error'
+if response.error_message:
+    raise HTTPException(status_code=500, detail=response.error_message)
+
+# Garante que sempre retorna uma lista
+return response.data or []
 
 
 @app.get("/status")

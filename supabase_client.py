@@ -1,33 +1,35 @@
 from supabase import create_client
 import os
 
-# Conexão
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
 
-supabase = create_client(url, key)
+def get_supabase():
+    """
+    Cria e retorna um client do Supabase usando as variáveis de ambiente.
+    """
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
 
-# Função genérica para buscar dados
-async def fetch_all(tabela: str, order: str = None, desc: bool = False, limit: int = None):
-    try:
-        query = supabase.table(tabela).select("*")
+    if not url or not key:
+        raise RuntimeError("SUPABASE_URL ou SUPABASE_KEY não estão configuradas no ambiente.")
 
-        if order:
-            query = query.order(order, desc=desc)
+    return create_client(url, key)
 
-        if limit:
-            query = query.limit(limit)
 
-        # A nova versão retorna um objeto com ".data"
-        response = query.execute()
+def get_config():
+    """
+    Retorna um dicionário com todas as variáveis de configuração usadas pela API.
+    """
+    return {
+        "SUPABASE_URL": os.getenv("SUPABASE_URL"),
+        "SUPABASE_KEY": os.getenv("SUPABASE_KEY"),
 
-        return {
-            "erro": False,
-            "dados": response.data
-        }
+        "SUPABASE_TABLE_PRODUTOS": os.getenv("SUPABASE_TABLE_PRODUTOS"),
+        "SUPABASE_VIEW_RANKING": os.getenv("SUPABASE_VIEW_RANKING"),
+        "SUPABASE_VIEW_PONTUACAO": os.getenv("SUPABASE_VIEW_PONTUACAO"),
 
-    except Exception as e:
-        return {
-            "erro": True,
-            "mensagem": str(e)
-        }
+        "SUPABASE_ORDER_PRODUTOS": os.getenv("SUPABASE_ORDER_PRODUTOS"),
+        "SUPABASE_ORDER_RANKING": os.getenv("SUPABASE_ORDER_RANKING"),
+        "SUPABASE_ORDER_PONTUACAO": os.getenv("SUPABASE_ORDER_PONTUACAO"),
+
+        "SUPABASE_FUNCTION_ATUALIZAR": os.getenv("SUPABASE_FUNCTION_ATUALIZAR"),
+    }

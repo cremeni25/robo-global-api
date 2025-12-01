@@ -1,47 +1,33 @@
+from supabase import create_client
 import os
-from functools import lru_cache
-from typing import Dict
-from supabase import create_client, Client
 
+# Conexão
+url = os.getenv("SUPABASE_URL")
+key = os.getenv("SUPABASE_KEY")
 
-REQUIRED_ENV_VARS = [
-    "SUPABASE_URL",
-    "SUPABASE_KEY",
-]
+supabase = create_client(url, key)
 
+# Função genérica para buscar dados
+async def fetch_all(tabela: str, order: str = None, desc: bool = False, limit: int = None):
+    try:
+        query = supabase.table(tabela).select("*")
 
-OPTIONAL_ENV_VARS = [
-    "SUPABASE_TABLE_PRODUTOS",
-    "SUPABASE_VIEW_RANKING",
-    "SUPABASE_VIEW_PONTUACAO",
-    "SUPABASE_ORDER_PRODUTOS",
-    "SUPABASE_ORDER_RANKING",
-    "SUPABASE_ORDER_PONTUACAO",
-    "SUPABASE_FUNCTION_ATUALIZAR",
-]
+        if order:
+            query = query.order(order, desc=desc)
 
+        if limit:
+            query = query.limit(limit)
 
-@lru_cache()
-def get_config() -> Dict[str, str]:
-    """Lê e guarda em cache as variáveis de ambiente da aplicação."""
-    cfg = {}
-    for key in REQUIRED_ENV_VARS + OPTIONAL_ENV_VARS:
-        cfg[key] = os.getenv(key, "").strip()
-    return cfg
+        # A nova versão retorna um objeto com ".data"
+        response = query.execute()
 
+        return {
+            "erro": False,
+            "dados": response.data
+        }
 
-@lru_cache()
-def get_supabase() -> Client:
-    """Cria e retorna um cliente Supabase usando variáveis de ambiente."""
-    cfg = get_config()
-
-    missing = [k for k in REQUIRED_ENV_VARS if not cfg.get(k)]
-    if missing:
-        raise RuntimeError(
-            f"As seguintes variáveis de ambiente obrigatórias não estão definidas: {', '.join(missing)}"
-        )
-
-    url = cfg["SUPABASE_URL"]
-    key = cfg["SUPABASE_KEY"]
-    client: Client = create_client(url, key)
-    return client
+    except Exception as e:
+        return {
+            "erro": True,
+            "mensagem": str(e)
+        }

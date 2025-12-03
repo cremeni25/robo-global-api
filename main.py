@@ -83,20 +83,32 @@ def get_produto_or_404(id_produto: str) -> dict:
 def get_plataforma_metrica(id_produto: str, nome_metrica: str) -> dict:
     """
     Busca o cadastro da métrica na tabela plataforma_metrica
-    para um produto específico.
+    sem diferenciar maiúsculas/minúsculas.
     """
+    nome_normalizado = nome_metrica.strip().lower()
+
+    # Busca todas as métricas do produto
     rows = fetch_all(
         "plataforma_metrica",
         id_produto=id_produto,
-        nome_metrica=nome_metrica,
     )
+
     if not rows:
         raise HTTPException(
             status_code=400,
-            detail=f"Métrica '{nome_metrica}' não cadastrada para o produto {id_produto}.",
+            detail=f"Nenhuma métrica encontrada para o produto {id_produto}.",
         )
-    # Se houver mais de uma (por plataforma), pegamos a primeira.
-    return rows[0]
+
+    # Valida ignorando maiúsculas/minúsculas
+    for row in rows:
+        if row["nome_metrica"].strip().lower() == nome_normalizado:
+            return row
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Métrica '{nome_metrica}' não cadastrada para o produto {id_produto}.",
+    )
+
 
 
 def registrar_valor_metrica(id_plataforma_metrica: str, valor: float) -> None:

@@ -14,7 +14,7 @@ from supabase_client import (
 app = FastAPI(
     title="Robô Global de Afiliados",
     description="API para ranking e pontuação de produtos de afiliados usando Supabase.",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 # ==========================
@@ -87,19 +87,13 @@ def get_plataforma_metrica(id_produto: str, nome_metrica: str) -> dict:
     """
     nome_normalizado = nome_metrica.strip().lower()
 
-    # Busca todas as métricas do produto
-    rows = fetch_all(
-        "plataforma_metrica",
-        id_produto=id_produto,
-    )
-
+    rows = fetch_all("plataforma_metrica", id_produto=id_produto)
     if not rows:
         raise HTTPException(
             status_code=400,
             detail=f"Nenhuma métrica encontrada para o produto {id_produto}.",
         )
 
-    # Valida ignorando maiúsculas/minúsculas
     for row in rows:
         if row["nome_metrica"].strip().lower() == nome_normalizado:
             return row
@@ -108,7 +102,6 @@ def get_plataforma_metrica(id_produto: str, nome_metrica: str) -> dict:
         status_code=400,
         detail=f"Métrica '{nome_metrica}' não cadastrada para o produto {id_produto}.",
     )
-
 
 
 def registrar_valor_metrica(id_plataforma_metrica: str, valor: float) -> None:
@@ -131,7 +124,6 @@ def get_ultimo_valor_score(
     """
     client = get_supabase()
 
-    # 1) pega o cadastro da métrica interna para o produto
     pm_rows = (
         client.table("plataforma_metrica")
         .select("id_plataforma_metrica")
@@ -146,13 +138,6 @@ def get_ultimo_valor_score(
         return None
 
     id_pm = pm_rows[0]["id_plataforma_metrica"]
-
-    # 2) pega o último histórico
-    hist_rows = (
-        client.table("metrica_historica")
-        .select("valor_numero, coletado_em")
-        .eq("id_metrica_historica", None)  # apenas para evitar erro de lint
-    )  # este trecho será sobrescrito abaixo
 
     hist_rows = (
         client.table("metrica_historica")
@@ -179,16 +164,7 @@ def calcular_scores(
     conversao: Optional[float] = None,
 ) -> Dict[str, float]:
     """
-    Fórmulas de exemplo para cálculo dos scores.
-    🔧 Ponto ÚNICO de ajuste: se quiser mudar a lógica do robô,
-    ajuste apenas esta função.
-
-    - CONVERSAO = VENDAS / CLIQUES (se não informado e cliques > 0)
-    - SCORE_QUALIDADE: foca mais em CONVERSAO e ROI
-    - SCORE_PERFORMANCE: foca em VENDAS, CLIQUES e CPC
-    - SCORE_GLOBAL_FINAL: combinação dos dois
-
-    Escala: 0 a 100 (limitado por min/max simples).
+    Ponto único de ajuste de lógica do robô.
     """
     if conversao is None:
         if cliques > 0:
@@ -196,28 +172,18 @@ def calcular_scores(
         else:
             conversao = 0.0
 
-    # Normalizações simples (exemplos, podem ser ajustadas)
-    conv_pct = conversao * 100  # ex: 0.03 -> 3%
-    roi_norm = roi  # assumindo já em %
+    conv_pct = conversao * 100.0
+    roi_norm = roi
     vendas_norm = vendas
     cliques_norm = cliques
-    cpc_norm = cpc
+    cpc_norm = cpc if cpc > 0 else 0.01
 
-    # Evitar divisões por zero
-    if cpc_norm <= 0:
-        cpc_norm = 0.01
-
-    # Qualidade: quanto melhor a conversão e o ROI, maior o score
     score_qualidade = (conv_pct * 0.6) + (roi_norm * 0.4)
-
-    # Performance: mais vendas e mais cliques, com penalização por CPC alto
     score_performance = (vendas_norm * 2.0) + (cliques_norm * 0.5) - (cpc_norm * 1.5)
 
-    # Normalização simples para não explodir:
     score_qualidade = max(0.0, min(score_qualidade, 100.0))
     score_performance = max(0.0, min(score_performance, 100.0))
 
-    # Combinação final
     score_global = (score_qualidade * 0.4) + (score_performance * 0.6)
     score_global = max(0.0, min(score_global, 100.0))
 
@@ -268,30 +234,25 @@ def atualizar_metricas(payload: AtualizarMetricasPayload):
     Recebe métricas externas de um produto,
     grava histórico e calcula os scores internos.
     """
-    produto = get_produto_or_404(payload.id_produto)
+    _ = get_produto_or_404(payload.id_produto)
 
-    # Extrai métricas externas com defaults seguros
     cli = float(payload.metricas.get("CLIQUES", 0))
     ven = float(payload.metricas.get("VENDAS", 0))
     cpc = float(payload.metricas.get("CPC", 0))
     roi = float(payload.metricas.get("ROI", 0))
     conv_input = payload.metricas.get("CONVERSAO")
 
-    # 1) Registrar histórico das EXTERNAS
+    # 1) Histórico das EXTERNAS
     for nome in METRICAS_EXTERNAS:
         if nome == "CONVERSAO" and conv_input is None:
-            # Se não foi enviada, vamos calcular depois
             continue
-
         valor = payload.metricas.get(nome)
         if valor is None:
-            # não envia histórico de métrica ausente
             continue
-
         pm = get_plataforma_metrica(payload.id_produto, nome)
         registrar_valor_metrica(pm["id_plataforma_metrica"], float(valor))
 
-    # 2) Calcular CONVERSAO + SCORES internos
+    # 2) Calcular conversão + scores internos
     scores = calcular_scores(
         cliques=cli,
         vendas=ven,
@@ -300,14 +261,12 @@ def atualizar_metricas(payload: AtualizarMetricasPayload):
         conversao=float(conv_input) if conv_input is not None else None,
     )
 
-    # 3) Registrar histórico das métricas internas (incluindo CONVERSAO)
-    #    CONVERSAO pode ser considerada "externa derivada" ou interna – aqui gravamos de qualquer forma.
+    # 3) Registrar históricos das métricas internas (inclui CONVERSAO)
     for nome in ["CONVERSAO"] + METRICAS_INTERNAS:
         valor = scores[nome]
         pm = get_plataforma_metrica(payload.id_produto, nome)
         registrar_valor_metrica(pm["id_plataforma_metrica"], float(valor))
 
-    # 4) Retorna apenas os scores finais calculados (inclui conversão)
     return scores
 
 
@@ -318,7 +277,6 @@ def get_ranking() -> List[RankingItem]:
     """
     client = get_supabase()
 
-    # 1) Busca todas as métricas SCORE_GLOBAL_FINAL
     pm_rows = (
         client.table("plataforma_metrica")
         .select("id_plataforma_metrica, id_produto")
@@ -333,7 +291,6 @@ def get_ranking() -> List[RankingItem]:
 
     ranking_tmp = []
 
-    # 2) Para cada métrica, pega o último histórico
     for pm in pm_rows:
         id_pm = pm["id_plataforma_metrica"]
         id_prod = pm["id_produto"]
@@ -358,7 +315,6 @@ def get_ranking() -> List[RankingItem]:
     if not ranking_tmp:
         return []
 
-    # 3) Busca dados dos produtos em um único select
     ids_produtos = list({p[0] for p in ranking_tmp})
 
     produtos_rows = (
@@ -372,10 +328,8 @@ def get_ranking() -> List[RankingItem]:
 
     produtos_map = {p["id_produto"]: p for p in produtos_rows}
 
-    # 4) Monta lista final e ordena por score desc
     ranking_items: List[RankingItem] = []
 
-    # Opcional: pegar também os últimos SCORE_QUALIDADE e SCORE_PERFORMANCE
     for id_prod, score_global in ranking_tmp:
         prod = produtos_map.get(id_prod, {})
         score_qual = get_ultimo_valor_score(id_prod, "SCORE_QUALIDADE")

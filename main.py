@@ -85,9 +85,9 @@ def ranking():
 
     return ranking
 
-# -----------------------------
-# PONTUAÇÃO (SIMPLIFICADA)
-# -----------------------------
+# ------------------------------------------------------------
+# ENDPOINT: PONTUAÇÃO (EVOLUÍDO)
+# ------------------------------------------------------------
 @app.get("/pontuacao")
 def pontuacao():
     db = get_supabase()
@@ -97,8 +97,25 @@ def pontuacao():
         raise HTTPException(404, "Nenhuma métrica encontrada")
 
     scores = {}
+
+    # Agrupa e soma valores por produto
     for row in result.data:
         pid = row["id_produto"]
-        scores[pid] = scores.get(pid, 0) + row["valor"]
+        valor = row.get("valor", 0)
 
-    return scores
+        if valor is None:
+            valor = 0
+
+        scores[pid] = scores.get(pid, 0) + valor
+
+    # Formatar resultado
+    resposta = [
+        {"id_produto": pid, "score_total": round(total, 2)}
+        for pid, total in scores.items()
+    ]
+
+    # Ordenar por score (decrescente)
+    resposta = sorted(resposta, key=lambda x: x["score_total"], reverse=True)
+
+    return resposta
+

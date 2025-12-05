@@ -18,14 +18,12 @@ class AtualizarPayload(BaseModel):
     metrica: str
     valor: float
 
-
 # ------------------------------------------------------------
 # ENDPOINT: STATUS
 # ------------------------------------------------------------
 @app.get("/status")
 def status():
     return {"status": "ok"}
-
 
 # ------------------------------------------------------------
 # ENDPOINT: LISTAR PRODUTOS
@@ -40,7 +38,6 @@ def listar_produtos():
 
     return result.data
 
-
 # ------------------------------------------------------------
 # ENDPOINT: ATUALIZAR MÉTRICA
 # ------------------------------------------------------------
@@ -53,15 +50,14 @@ def atualizar_metrica(payload: AtualizarPayload):
     if not produto.data:
         raise HTTPException(404, "Produto não encontrado")
 
-    # 2) Atualiza ou insere métrica
-    db.table("metricas").upsert({
+    # 2) Insere registro na tabela metrica_historica
+    db.table("metrica_historica").insert({
         "id_produto": payload.id_produto,
         "metrica": payload.metrica,
         "valor": payload.valor
     }).execute()
 
-    return {"status": "ok", "mensagem": "Métrica atualizada com sucesso"}
-
+    return {"status": "ok", "mensagem": "Métrica registrada com sucesso"}
 
 # ------------------------------------------------------------
 # ENDPOINT: RANKING (SIMPLIFICADO)
@@ -69,16 +65,13 @@ def atualizar_metrica(payload: AtualizarPayload):
 @app.get("/ranking")
 def ranking():
     db = get_supabase()
-    result = db.table("metricas").select("*").execute()
+    result = db.table("metrica_historica").select("*").execute()
 
     if not result.data:
         raise HTTPException(404, "Nenhuma métrica encontrada")
 
-    # Exemplo simples: ordenar por valor
     ranking = sorted(result.data, key=lambda x: x["valor"], reverse=True)
-
     return ranking
-
 
 # ------------------------------------------------------------
 # ENDPOINT: PONTUAÇÃO (SIMPLIFICADO)
@@ -86,16 +79,14 @@ def ranking():
 @app.get("/pontuacao")
 def pontuacao():
     db = get_supabase()
-    result = db.table("metricas").select("*").execute()
+    result = db.table("metrica_historica").select("*").execute()
 
     if not result.data:
         raise HTTPException(404, "Nenhuma métrica encontrada")
 
-    # Exemplo simples: soma total por produto
     scores = {}
     for row in result.data:
         pid = row["id_produto"]
         scores[pid] = scores.get(pid, 0) + row["valor"]
 
     return scores
-

@@ -69,7 +69,19 @@ def ranking():
     if not result.data:
         raise HTTPException(404, "Nenhuma métrica encontrada")
 
-    ranking = sorted(result.data, key=lambda x: x["valor"], reverse=True)
+    # Agrupar por produto e somar valores
+    scores = {}
+    for row in result.data:
+        pid = row["id_produto"]
+        scores[pid] = scores.get(pid, 0) + float(row["valor"])
+
+    # Transformar em lista ordenada
+    ranking = [
+        {"id_produto": pid, "score_total": total}
+        for pid, total in scores.items()
+    ]
+
+    ranking.sort(key=lambda x: x["score_total"], reverse=True)
 
     return ranking
 

@@ -1,84 +1,101 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import supabase
-import os
+from supabase_client import get_supabase
 
-# Inicialização da API
 app = FastAPI(
     title="Robô Global de Afiliados",
     description="API para ranking e pontuação de produtos usando Supabase.",
     version="3.0.0"
 )
 
-# Conexão com Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# ------------------------------------------------------------
+# MODELOS
+# ------------------------------------------------------------
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise Exception("Erro: Variáveis de ambiente SUPABASE_URL e SUPABASE_KEY não configuradas.")
-
-client = supabase.create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Endpoint de status
-@app.get("/status")
-def status():
-    return {"status": "ok"}
-
-# Endpoint para listar produtos
-@app.get("/produtos")
-def listar_produtos():
-    try:
-        response = client.table("produtos").select("*").execute()
-        return response.data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Endpoint de atualização de métricas
 class AtualizarPayload(BaseModel):
     id_produto: str
     metrica: str
     valor: float
 
+
+# ------------------------------------------------------------
+# ENDPOINT: STATUS
+# ------------------------------------------------------------
+@app.get("/status")
+def status():
+    return {"status": "ok"}
+
+
+# ------------------------------------------------------------
+# ENDPOINT: LISTAR PRODUTOS
+# ------------------------------------------------------------
+@app.get("/produtos")
+def listar_produtos():
+    db = get_supabase()
+    result = db.table("produtos").select("*").execute()
+
+    if not result.data:
+        raise HTTPException(404, "Nenhum produto encontrado")
+
+    return result.data
+
+
+# ------------------------------------------------------------
+# ENDPOINT: ATUALIZAR MÉTRICA
+# ------------------------------------------------------------
 @app.post("/atualizar")
-def atualizar(payload: AtualizarPayload):
-    try:
-        # Validar se produto existe
-        produto = client.table("produtos").select("*").eq("id_produto", payload.id_produto).execute()
-        if not produto.data:
-            raise HTTPException(status_code=404, detail="Produto não encontrado.")
+def atualizar_metrica(payload: AtualizarPayload):
+    db = get_supabase()
 
-        # Buscar métrica na tabela plataforma_metrica
-        metrica = client.table("plataforma_metrica").select("*").eq("nome_metrica", payload.metrica).execute()
-        if not metrica.data:
-            raise HTTPException(status_code=400, detail=f"Métrica '{payload.metrica}' não cadastrada.")
+    # 1) Verifica se o produto existe
+    produto = db.table("produtos").select("*").eq("id_produto", payload.id_produto).execute()
+    if not produto.data:
+        raise HTTPException(404, "Produto não encontrado")
 
-        # Inserir no histórico
-        insert_data = {
-            "id_produto": payload.id_produto,
-            "nome_metrica": payload.metrica,
-            "valor": payload.valor,
-        }
-        client.table("metrica_historica").insert(insert_data).execute()
+    # 2) Atualiza ou insere métrica
+    db.table("metricas").upsert({
+        "id_produto": payload.id_produto,
+        "metrica": payload.metrica,
+        "valor": payload.valor
+    }).execute()
 
-        return {"status": "ok", "mensagem": "Métrica atualizada com sucesso."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "ok", "mensagem": "Métrica atualizada com sucesso"}
 
-# Endpoint ranking
+
+# ------------------------------------------------------------
+# ENDPOINT: RANKING (SIMPLIFICADO)
+# ------------------------------------------------------------
 @app.get("/ranking")
 def ranking():
-    try:
-        response = client.rpc("calcular_ranking").execute()
-        return response.data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    db = get_supabase()
+    result = db.table("metricas").select("*").execute()
 
-# Endpoint pontuação
+    if not result.data:
+        raise HTTPException(404, "Nenhuma métrica encontrada")
+
+    # Exemplo simples: ordenar por valor
+    ranking = sorted(result.data, key=lambda x: x["valor"], reverse=True)
+
+    return ranking
+
+
+# ------------------------------------------------------------
+# ENDPOINT: PONTUAÇÃO (SIMPLIFICADO)
+# ------------------------------------------------------------
 @app.get("/pontuacao")
 def pontuacao():
-    try:
-        response = client.rpc("calcular_pontuacao").execute()
-        return response.data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    db = get_supabase()
+    result = db.table("metricas").select("*").execute()
+
+    if not result.data:
+        raise HTTPException(404, "Nenhuma métrica encontrada")
+
+    # Exemplo simples: soma total por produto
+    scores = {}
+    for row in result.data:
+        pid = row["id_produto"]
+        scores[pid] = scores.get(pid, 0) + row["valor"]
+
+    return scores
+

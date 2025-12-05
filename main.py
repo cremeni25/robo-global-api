@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from supabase_client import get_supabase
+from supabase_client_new import get_supabase
 
 app = FastAPI(
     title="Robô Global de Afiliados",

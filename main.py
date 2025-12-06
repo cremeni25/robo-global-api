@@ -1,54 +1,68 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any
-from supabase_client_new import get_supabase
+from datetime import date
+from typing import Optional, List, Dict, Any
+from supabase_client import get_supabase, get_config
+
 
 app = FastAPI(
     title="Robô Global de Afiliados",
     description="API para ranking e pontuação de produtos usando Supabase.",
-    version="3.1.0"
+    version="4.0.0"
 )
 
-# -----------------------------
-# MODELO DO PAYLOAD
-# -----------------------------
+# ------------------------------------------------------------
+# MODELAGEM DO PAYLOAD /atualizar
+# ------------------------------------------------------------
+
 class AtualizarPayload(BaseModel):
     id_produto: str
-    metrica: str
-    valor: float
+    cliques: Optional[float] = None
+    vendas: Optional[float] = None
+    conversao: Optional[float] = None
+    cpc: Optional[float] = None
+    roi: Optional[float] = None
+    referencia_data: Optional[date] = None
 
-# -----------------------------
-# STATUS
-# -----------------------------
+
+# ------------------------------------------------------------
+# ENDPOINT STATUS
+# ------------------------------------------------------------
+
 @app.get("/status")
-def status():
-    return {"status": "ok"}
+async def status():
+    try:
+        supabase = get_supabase()
+        supabase.table("produtos").select("id_produto").limit(1).execute()
+        return {"status": "ok", "supabase": "conectado"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-# -----------------------------
-# LISTAR PRODUTOS
-# -----------------------------
+
+# ------------------------------------------------------------
+# ENDPOINT /produtos
+# ------------------------------------------------------------
+
 @app.get("/produtos")
-def listar_produtos():
-    db = get_supabase()
-    result = db.table("produtos").select("*").execute()
-
-    if not result.data:
-        raise HTTPException(404, "Nenhum produto encontrado")
-    
+async def listar_produtos():
+    supabase = get_supabase()
+    result = supabase.table("produtos").select("*").execute()
     return result.data
 
-# -----------------------------
-# ATUALIZAR MÉTRICA
-# -----------------------------
+
+# ------------------------------------------------------------
+# ENDPOINT /atualizar  (INSERÇÃO DE MÉTRICAS)
+# ------------------------------------------------------------
+
 @app.post("/atualizar")
 async def atualizar_metricas(payload: AtualizarPayload):
 
     supabase = get_supabase()
 
     id_produto = payload.id_produto
-    referencia_data = payload.referencia_data or date.today()
+    referencia = payload.referencia_data or date.today()
 
-    metricas_payload = {
+    metricas_recebidas = {
         "CLIQUES": payload.cliques,
         "VENDAS": payload.vendas,
         "CONVERSAO": payload.conversao,
@@ -56,100 +70,51 @@ async def atualizar_metricas(payload: AtualizarPayload):
         "ROI": payload.roi
     }
 
-    # 1) Buscar catálogo de métricas
-    metricas_tipo = supabase.table("metricas_tipo").select("*").execute().data
-    mapa_metricas = {m["codigo"]: m["id"] for m in metricas_tipo}
+    # 1) Carregar catálogo de métricas
+    catalogo = supabase.table("metricas_tipo").select("*").execute()
+    mapa_metricas = {m["codigo"]: m["id"] for m in catalogo.data}
 
-    results = []
+    processadas = []
 
-    for codigo, valor in metricas_payload.items():
+    # 2) Inserir ou atualizar métricas
+    for codigo, valor in metricas_recebidas.items():
+
         if valor is None:
-            continue  # só grava se tiver valor enviado
+            continue
 
         if codigo not in mapa_metricas:
             raise HTTPException(
                 status_code=400,
-                detail=f"Métrica {codigo} não cadastrada no banco."
+                detail=f"Métrica {codigo} não cadastrada no Supabase"
             )
 
         id_metrica = mapa_metricas[codigo]
 
-        # 2) Upsert para histórico
         supabase.table("produto_metrica_historico").upsert({
             "id_produto": id_produto,
             "id_metrica": id_metrica,
             "valor": valor,
-            "referencia_data": referencia_data
+            "referencia_data": referencia
         }, on_conflict=["id_produto", "id_metrica", "referencia_data"]).execute()
 
-        results.append({codigo: "ok"})
+        processadas.append({codigo: "ok"})
 
     return {
         "status": "sucesso",
-        "referencia_data": str(referencia_data),
-        "metricas_processadas": results
+        "referencia_data": str(referencia),
+        "metricas": processadas
     }
 
 
-# -----------------------------
-# RANKING (SIMPLIFICADO)
-# -----------------------------
-@app.get("/ranking")
-def ranking():
-    db = get_supabase()
-    result = db.table("metricas").select("*").execute()
-
-    if not result.data:
-        raise HTTPException(404, "Nenhuma métrica encontrada")
-
-    # Agrupar por produto e somar valores
-    scores = {}
-    for row in result.data:
-        pid = row["id_produto"]
-        scores[pid] = scores.get(pid, 0) + float(row["valor"])
-
-    # Transformar em lista ordenada
-    ranking = [
-        {"id_produto": pid, "score_total": total}
-        for pid, total in scores.items()
-    ]
-
-    ranking.sort(key=lambda x: x["score_total"], reverse=True)
-
-    return ranking
-
 # ------------------------------------------------------------
-# ENDPOINT: PONTUAÇÃO (EVOLUÍDO)
+# ENDPOINT /pontuacao (CALCULA PONTUAÇÃO DO PRODUTO)
 # ------------------------------------------------------------
-@app.get("/pontuacao")
-def pontuacao():
-    db = get_supabase()
-    result = db.table("metricas").select("*").execute()
 
-    if not result.data:
-        raise HTTPException(404, "Nenhuma métrica encontrada")
+@app.get("/pontuacao/{id_produto}")
+async def calcular_pontuacao(id_produto: str):
 
-    scores = {}
+    supabase = get_supabase()
 
-    # Agrupa e soma valores por produto
-    for row in result.data:
-        pid = row["id_produto"]
-        valor = row.get("valor", 0)
-
-        if valor is None:
-            valor = 0
-
-        scores[pid] = scores.get(pid, 0) + valor
-
-    # Formatar resultado
-    resposta = [
-        {"id_produto": pid, "score_total": round(total, 2)}
-        for pid, total in scores.items()
-    ]
-
-    # Ordenar por score (decrescente)
-    resposta = sorted(resposta, key=lambda x: x["score_total"], reverse=True)
-
-    return resposta
-
-
+    # 1) Buscar histórico
+    historico = supabase.table("produto_metrica_historico").select("*").eq("id_produto", id_produto).execute()
+    metricas = historico.data

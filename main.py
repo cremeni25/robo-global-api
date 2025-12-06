@@ -41,22 +41,55 @@ def listar_produtos():
 # ATUALIZAR MÉTRICA
 # -----------------------------
 @app.post("/atualizar")
-def atualizar_metrica(payload: AtualizarPayload):
-    db = get_supabase()
+async def atualizar_metricas(payload: AtualizarPayload):
 
-    # 1 — Verificar se produto existe
-    produto = db.table("produtos").select("*").eq("id_produto", payload.id_produto).execute()
-    if not produto.data:
-        raise HTTPException(404, "Produto não encontrado")
+    supabase = get_supabase()
 
-    # 2 — Inserir ou atualizar métrica
-    db.table("metricas").upsert({
-        "id_produto": payload.id_produto,
-        "metrica": payload.metrica,
-        "valor": payload.valor
-    }).execute()
+    id_produto = payload.id_produto
+    referencia_data = payload.referencia_data or date.today()
 
-    return {"status": "ok", "mensagem": "Métrica atualizada"}
+    metricas_payload = {
+        "CLIQUES": payload.cliques,
+        "VENDAS": payload.vendas,
+        "CONVERSAO": payload.conversao,
+        "CPC": payload.cpc,
+        "ROI": payload.roi
+    }
+
+    # 1) Buscar catálogo de métricas
+    metricas_tipo = supabase.table("metricas_tipo").select("*").execute().data
+    mapa_metricas = {m["codigo"]: m["id"] for m in metricas_tipo}
+
+    results = []
+
+    for codigo, valor in metricas_payload.items():
+        if valor is None:
+            continue  # só grava se tiver valor enviado
+
+        if codigo not in mapa_metricas:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Métrica {codigo} não cadastrada no banco."
+            )
+
+        id_metrica = mapa_metricas[codigo]
+
+        # 2) Upsert para histórico
+        supabase.table("produto_metrica_historico").upsert({
+            "id_produto": id_produto,
+            "id_metrica": id_metrica,
+            "valor": valor,
+            "referencia_data": referencia_data
+        }, on_conflict=["id_produto", "id_metrica", "referencia_data"]).execute()
+
+        results.append({codigo: "ok"})
+
+    return {
+        "status": "sucesso",
+        "referencia_data": str(referencia_data),
+        "metricas_processadas": results
+    }
+
 
 # -----------------------------
 # RANKING (SIMPLIFICADO)

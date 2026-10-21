@@ -118,3 +118,24 @@ async def calcular_pontuacao(id_produto: str):
     # 1) Buscar histórico
     historico = supabase.table("produto_metrica_historico").select("*").eq("id_produto", id_produto).execute()
     metricas = historico.data
+
+
+def report_affiliate_configuration_presence():
+    """Report configured setting names only; never read or disclose values."""
+    import os
+    import json
+    for platform in ("HOTMART", "EDUZZ", "MONETIZZE"):
+        names = sorted(name for name in os.environ
+                       if name.startswith(platform + "_")
+                       and name.replace("_", "").isalnum()
+                       and bool(os.environ.get(name, "").strip()))
+        print("[AFFILIATE_CONFIG] " + json.dumps({
+            "platform": platform, "configured_variable_names": names,
+            "credential_values_disclosed": False,
+            "catalog_access_verified": False,
+        }, sort_keys=True), flush=True)
+
+
+@app.on_event('startup')
+def report_platform_access_configuration():
+    report_affiliate_configuration_presence()

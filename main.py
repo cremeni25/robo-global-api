@@ -1,8 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 from datetime import date
 from typing import Optional, List, Dict, Any
-from supabase_client import get_supabase, get_config
+from supabase_client import get_supabase
 
 
 app = FastAPI(
@@ -54,7 +54,15 @@ async def listar_produtos():
 # ENDPOINT /atualizar  (INSERÇÃO DE MÉTRICAS)
 # ------------------------------------------------------------
 
-@app.post("/atualizar")
+def require_ingest_key(x_core_ingest_key: str = Header(default="")):
+    import os
+    import secrets
+    expected = os.environ.get("CORE_INGEST_KEY", "")
+    if not expected or not secrets.compare_digest(expected, x_core_ingest_key):
+        raise HTTPException(status_code=401, detail="invalid ingest key")
+
+
+@app.post("/atualizar", dependencies=[Depends(require_ingest_key)])
 async def atualizar_metricas(payload: AtualizarPayload):
 
     supabase = get_supabase()

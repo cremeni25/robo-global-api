@@ -21,13 +21,19 @@ def executar_ciclo():
     try:
         log("Iniciando ciclo operacional")
 
-        status = requests.get(STATUS_ENDPOINT, timeout=10).json()
+        status_response = requests.get(STATUS_ENDPOINT, timeout=10)
+        status_response.raise_for_status()
+        status = status_response.json()
+        if not isinstance(status, dict) or not isinstance(status.get("operacao_ativa"), bool):
+            log("WORKER_CONTRACT_MISMATCH expected=operacao_ativa:boolean execution_skipped=true")
+            return
 
         if status.get("operacao_ativa") is not True:
             log("Operação não ativa — ciclo encerrado")
             return
 
         response = requests.post(CICLO_ENDPOINT, timeout=30)
+        response.raise_for_status()
         resultado = response.json()
 
         requests.post(REGISTRO_ENDPOINT, json={
@@ -38,7 +44,7 @@ def executar_ciclo():
         log(f"Ciclo executado com sucesso: {resultado.get('status')}")
 
     except Exception as e:
-        log(f"ERRO NO CICLO: {str(e)}")
+        log(f"ERRO NO CICLO categoria={type(e).__name__}")
 
 def loop_infinito():
     log("LOOP OPERACIONAL INICIADO — ROBO GLOBAL VIVO")
@@ -47,5 +53,22 @@ def loop_infinito():
         log(f"Aguardando {LOOP_INTERVAL_SECONDS} segundos para próximo ciclo")
         time.sleep(LOOP_INTERVAL_SECONDS)
 
+
+def report_affiliate_configuration_presence():
+    """Report configured setting names only; never read or disclose values."""
+    import os
+    import json
+    for platform in ("HOTMART", "EDUZZ", "MONETIZZE"):
+        names = sorted(name for name in os.environ
+                       if name.startswith(platform + "_")
+                       and name.replace("_", "").isalnum()
+                       and bool(os.environ.get(name, "").strip()))
+        print("[AFFILIATE_CONFIG] " + json.dumps({
+            "platform": platform, "configured_variable_names": names,
+            "credential_values_disclosed": False,
+            "catalog_access_verified": False,
+        }, sort_keys=True), flush=True)
+
 if __name__ == "__main__":
+    report_affiliate_configuration_presence()
     loop_infinito()
